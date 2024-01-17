@@ -1,36 +1,55 @@
-use std::time::Duration;
-use tokio::time::sleep;
-use actix_web::{web, HttpResponse, HttpServer, App, Responder, get};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use std::io;
+use actix_web::{web, App, HttpServer, Responder, HttpResponse, get};
+use serde::{Deserialize, Serialize};
 
 #[actix_web::main]
-async fn main() -> std::io::Result<()> {
-
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-    builder.set_private_key_file("key.pem", SslFiletype::PEM).unwrap();
-    builder.set_certificate_chain_file("cert.pem").unwrap();
-
-    // para gerar os arquivos de certificado e chave, use o comando abaixo:
-    // openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
-    //   -days 365 -sha256 -subj "/C=CN/ST=Fujian/L=Xiamen/O=TVlinux/OU=Org/CN=muro.lxd"
-    // Para remover a senha do arquivo de chave, use o comando abaixo:
-    // openssl rsa -in key.pem -out nopass.pem
-
-    HttpServer::new(|| App::new()
-        .route("/worker", web::get().to(HttpResponse::Ok))
-        .service(index)).workers(4)
-        .bind_openssl(("127.0.0.1", 8080), builder)?
-        .run()
-        .await
+async fn main() -> io::Result<()> {
+    HttpServer::new(
+        || App::new()
+            .service(index)
+            .service(index_2)
+            .service(query_parameter)
+    )
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
 }
 
-async fn my_handler() -> impl  Responder {
-    sleep(Duration::from_secs(5)).await;
+#[derive(Deserialize, Serialize)]
+struct MyInfo {
+    id: String,
+    username: String
+}
 
-    "Response"
+#[derive(Deserialize)]
+struct User {
+    user_id: u8,
+    friend: String
+}
+
+#[derive(Deserialize, Debug)]
+struct QueryParameter {
+    #[serde(default)]
+    name: Option<String>
 }
 
 #[get("/")]
-async fn index() -> impl Responder {
-    HttpResponse::Ok().body("Hy man!")
+async fn index(path: web::Path<(String, String)>, json: web::Json<MyInfo>) -> impl Responder {
+    let path = path.into_inner();
+    let ret = format!("{} {} {} {}", path.0, path.1, json.id, json.username);
+
+    HttpResponse::Ok().body(ret)
+}
+
+#[get("/user/{user_id}/{friend}")]
+async fn index_2(path: web::Path<User>) -> Result<String, io::Error> {
+    Ok(format!("Welcome {}, your id is {}", path.friend, path.user_id))
+}
+
+#[get("/query")]
+async fn query_parameter(query: web::Query<QueryParameter>) -> impl Responder {
+    match &query.name {
+        Some(x) => HttpResponse::Ok().body(format!("Hello {}", x)),
+        None => HttpResponse::Ok().body("You not use query parameter")
+    }
 }
